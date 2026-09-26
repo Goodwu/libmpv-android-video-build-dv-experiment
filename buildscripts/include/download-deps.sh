@@ -100,7 +100,7 @@ see <ndk>/sources/third_party/shaderc
 HEREDOC
 
 if [ ! -d libplacebo ]; then
-	git clone https://code.videolan.org/videolan/libplacebo.git libplacebo
+	git clone https://github.com/Goodwu/libplacebo.git libplacebo
 	git -C libplacebo checkout $v_libplacebo
 	git -C libplacebo submodule update --init --recursive
 fi
@@ -108,7 +108,7 @@ verify_sha libplacebo $v_libplacebo
 
 # mpv
 if [ ! -d mpv ]; then
-	git clone https://github.com/mpv-player/mpv.git mpv
+	git clone https://github.com/Goodwu/mpv.git mpv
 	git -C mpv checkout $v_mpv
 fi
 verify_sha mpv $v_mpv
