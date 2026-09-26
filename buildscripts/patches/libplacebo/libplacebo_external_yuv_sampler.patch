@@ -1,0 +1,104 @@
+diff --git a/src/dispatch.c b/src/dispatch.c
+index a593f256..e20444e2 100644
+--- a/src/dispatch.c
++++ b/src/dispatch.c
+@@ -323,7 +323,8 @@ static void generate_shaders(pl_dispatch dp,
+ 
+     // Enable all extensions needed for different types of input
+     bool has_ssbo = false, has_ubo = false, has_img = false, has_texel = false,
+-         has_ext = false, has_nofmt = false, has_gather = false;
++         has_ext = false, has_ext_yuv = false, has_nofmt = false,
++         has_gather = false;
+     for (int i = 0; i < sh->descs.num; i++) {
+         switch (sh->descs.elem[i].desc.type) {
+         case PL_DESC_BUF_UNIFORM: has_ubo = true; break;
+@@ -348,6 +349,7 @@ static void generate_shaders(pl_dispatch dp,
+             case PL_SAMPLER_NORMAL: break;
+             case PL_SAMPLER_RECT: break;
+             case PL_SAMPLER_EXTERNAL: has_ext = true; break;
++            case PL_SAMPLER_EXTERNAL_YUV: has_ext_yuv = true; break;
+             case PL_SAMPLER_TYPE_COUNT: pl_unreachable();
+             }
+             break;
+@@ -374,6 +376,8 @@ static void generate_shaders(pl_dispatch dp,
+             ADD(pre, "#extension GL_OES_EGL_image_external : enable\n");
+         }
+     }
++    if (has_ext_yuv)
++        ADD(pre, "#extension GL_EXT_YUV_target : require\n");
+     if (has_nofmt)
+         ADD(pre, "#extension GL_EXT_shader_image_load_formatted : enable\n");
+     if (has_gather && !gpu->glsl.gles)
+@@ -467,6 +471,7 @@ static void generate_shaders(pl_dispatch dp,
+                 [PL_SAMPLER_NORMAL][3]  = "sampler3D",
+                 [PL_SAMPLER_RECT][2]    = "sampler2DRect",
+                 [PL_SAMPLER_EXTERNAL][2] = "samplerExternalOES",
++                [PL_SAMPLER_EXTERNAL_YUV][2] = "highp __samplerExternal2DY2YEXT",
+             };
+ 
+             pl_tex tex = sd->binding.object;
+diff --git a/src/include/libplacebo/gpu.h b/src/include/libplacebo/gpu.h
+index fcaca197..c82fe670 100644
+--- a/src/include/libplacebo/gpu.h
++++ b/src/include/libplacebo/gpu.h
+@@ -735,6 +735,7 @@ enum pl_sampler_type {
+     PL_SAMPLER_NORMAL,      // gsampler2D, gsampler3D etc.
+     PL_SAMPLER_RECT,        // gsampler2DRect
+     PL_SAMPLER_EXTERNAL,    // gsamplerExternalOES
++    PL_SAMPLER_EXTERNAL_YUV,// __samplerExternal2DY2YEXT (raw Y/Cb/Cr)
+     PL_SAMPLER_TYPE_COUNT,
+ };
+ 
+diff --git a/src/include/libplacebo/opengl.h b/src/include/libplacebo/opengl.h
+index 168281e1..4975339a 100644
+--- a/src/include/libplacebo/opengl.h
++++ b/src/include/libplacebo/opengl.h
+@@ -201,6 +201,10 @@ struct pl_opengl_wrap_params {
+ 
+     // The texture's GLint sized internal format (e.g. GL_RGBA16F). Required.
+     int iformat;
++
++    // Select GL_EXT_YUV_target raw Y/Cb/Cr sampling for an external texture.
++    // The default PL_SAMPLER_NORMAL keeps target-based sampler inference.
++    enum pl_sampler_type sampler_type;
+ };
+ 
+ #define pl_opengl_wrap_params(...) (&(struct pl_opengl_wrap_params) { __VA_ARGS__ })
+diff --git a/src/opengl/gpu_tex.c b/src/opengl/gpu_tex.c
+index 69e118bf..f4b6a27f 100644
+--- a/src/opengl/gpu_tex.c
++++ b/src/opengl/gpu_tex.c
+@@ -718,12 +718,21 @@ pl_tex pl_opengl_wrap(pl_gpu gpu, const struct pl_opengl_wrap_params *params)
+                    "`pl_sampler_type`", params->target);
+             goto error;
+         }
++        if (params->sampler_type != PL_SAMPLER_NORMAL) {
++            if (params->target != GL_TEXTURE_EXTERNAL_OES ||
++                params->sampler_type != PL_SAMPLER_EXTERNAL_YUV) {
++                PL_ERR(gpu, "Unsupported explicit sampler type for texture target");
++                goto error;
++            }
++            tex->sampler_type = params->sampler_type;
++        }
+     }
+ 
+     // Create optional extra fbo if needed/possible
+     bool can_fbo = tex_gl->texture &&
+                    (fmt->caps & PL_FMT_CAP_RENDERABLE) &&
+                    tex->sampler_type != PL_SAMPLER_EXTERNAL &&
++                   tex->sampler_type != PL_SAMPLER_EXTERNAL_YUV &&
+                    dims < 3;
+ 
+     if (can_fbo && !tex_gl->fbo) {
+diff --git a/src/shaders.c b/src/shaders.c
+index d27134ac..058ef7b6 100644
+--- a/src/shaders.c
++++ b/src/shaders.c
+@@ -642,6 +642,7 @@ static const char *samplers2D[] = {
+     [PL_SAMPLER_NORMAL]     = "sampler2D",
+     [PL_SAMPLER_RECT]       = "sampler2DRect",
+     [PL_SAMPLER_EXTERNAL]   = "samplerExternalOES",
++    [PL_SAMPLER_EXTERNAL_YUV] = "highp __samplerExternal2DY2YEXT",
+ };
+ 
+ ident_t sh_subpass(pl_shader sh, pl_shader sub)

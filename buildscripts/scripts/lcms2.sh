@@ -15,7 +15,7 @@ else
 fi
 
 unset CC CXX
-meson setup $build \
+meson setup $build --prefix=/usr/local \
   --cross-file "$prefix_dir"/crossfile.txt \
   -Dtests=disabled
 

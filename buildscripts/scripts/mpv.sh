@@ -16,9 +16,29 @@ fi
 
 unset CC CXX # meson wants these unset
 
+apply_required_patch() {
+	local patch="../../patches/mpv/$1"
+	if git apply --reverse --check "$patch"; then
+		return 0
+	fi
+	if git apply --check "$patch"; then
+		git apply "$patch"
+		return 0
+	fi
+	printf >&2 'Required mpv patch is incompatible: %s\n' "$patch"
+	exit 1
+}
+
+apply_required_patch mpv_lavc_set_java_vm.patch
+apply_required_patch mpv_fence_leak-fix.patch
+apply_required_patch mpv_aimagereader_max_images3.patch
+apply_required_patch mpv_android_mediacodec_opaque_one_frame.patch
+apply_required_patch mpv_aimagereader_bounded_acquire_retry.patch
+apply_required_patch mpv_gles_load_uniform4f.patch
+
 sed -i -e "s/meson.build_options()/''/" meson.build
 
-meson setup $build --cross-file "$prefix_dir"/crossfile.txt \
+meson setup $build --prefix=/usr/local --cross-file "$prefix_dir"/crossfile.txt \
 	--strip \
 	--prefer-static \
 	--default-library shared \

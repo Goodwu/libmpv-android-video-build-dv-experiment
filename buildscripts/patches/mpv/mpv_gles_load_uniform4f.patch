@@ -1,0 +1,12 @@
+diff --git a/video/out/opengl/common.c b/video/out/opengl/common.c
+index a5de79c..9fc2701 100644
+--- a/video/out/opengl/common.c
++++ b/video/out/opengl/common.c
+@@ -141,6 +141,7 @@ static const struct gl_functions gl_functions[] = {
+             DEF_FN(Uniform1f),
+             DEF_FN(Uniform2f),
+             DEF_FN(Uniform3f),
++            DEF_FN(Uniform4f),
+             DEF_FN(Uniform1i),
+             DEF_FN(UniformMatrix2fv),
+             DEF_FN(UniformMatrix3fv),

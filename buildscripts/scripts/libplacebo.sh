@@ -15,7 +15,18 @@ else
 fi
 
 unset CC CXX
-meson setup $build --cross-file "$prefix_dir"/crossfile.txt \
+
+external_yuv_patch=../../patches/libplacebo/libplacebo_external_yuv_sampler.patch
+if git apply --reverse --check "$external_yuv_patch"; then
+	true
+elif git apply --check "$external_yuv_patch"; then
+	git apply "$external_yuv_patch"
+else
+	printf >&2 'Required libplacebo patch is incompatible: %s\n' "$external_yuv_patch"
+	exit 1
+fi
+
+meson setup $build --prefix=/usr/local --cross-file "$prefix_dir"/crossfile.txt \
 	-Dvulkan=enabled -Ddemos=false -Dshaderc=enabled -Dlcms=enabled
 
 ninja -C $build -j$cores
