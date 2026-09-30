@@ -1,0 +1,58 @@
+diff --git a/video/out/opengl/context_android.c b/video/out/opengl/context_android.c
+index 0a12cf8..4485c88 100644
+--- a/video/out/opengl/context_android.c
++++ b/video/out/opengl/context_android.c
+@@ -17,23 +17,41 @@
+ 
+ #include <EGL/egl.h>
+ #include <EGL/eglext.h>
++#include <string.h>
++#include <sys/system_properties.h>
+ 
+ #include "video/out/android_common.h"
+ #include "egl_helpers.h"
+ #include "common/common.h"
+ #include "context.h"
++#include "osdep/timer.h"
+ 
+ struct priv {
+     struct GL gl;
+     EGLDisplay egl_display;
+     EGLContext egl_context;
+     EGLSurface egl_surface;
++    bool trace_swaps;
++    unsigned long long swap_count;
++    unsigned long long swap_failures;
+ };
+ 
+ static void android_swap_buffers(struct ra_ctx *ctx)
+ {
+     struct priv *p = ctx->priv;
+-    eglSwapBuffers(p->egl_display, p->egl_surface);
++    int64_t start_ns = p->trace_swaps ? mp_time_ns() : 0;
++    EGLBoolean ok = eglSwapBuffers(p->egl_display, p->egl_surface);
++    if (p->trace_swaps) {
++        p->swap_count++;
++        if (!ok)
++            p->swap_failures++;
++        if (!ok || p->swap_count % 30 == 0) {
++            EGLint error = ok ? EGL_SUCCESS : eglGetError();
++            MP_ERR(ctx, "MEDIA_KIT_SWAP count=%llu failures=%llu ok=%d egl_error=0x%x duration_ms=%.3f\n",
++                   p->swap_count, p->swap_failures, ok, error,
++                   (mp_time_ns() - start_ns) / 1000000.0);
++        }
++    }
+ }
+ 
+ static void android_uninit(struct ra_ctx *ctx)
+@@ -55,6 +73,10 @@ static void android_uninit(struct ra_ctx *ctx)
+ static bool android_init(struct ra_ctx *ctx)
+ {
+     struct priv *p = ctx->priv = talloc_zero(ctx, struct priv);
++    char swap_trace_property[PROP_VALUE_MAX] = {0};
++    p->trace_swaps =
++        __system_property_get("debug.media_kit.swap_trace", swap_trace_property) > 0 &&
++        strcmp(swap_trace_property, "1") == 0;
+ 
+     if (!vo_android_init(ctx->vo))
+         goto fail;

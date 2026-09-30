@@ -1,0 +1,91 @@
+--- a/video/out/hwdec/hwdec_aimagereader.c
++++ b/video/out/hwdec/hwdec_aimagereader.c
+@@ -19,6 +19,8 @@
+ 
+ #include <assert.h>
+ #include <dlfcn.h>
++#include <string.h>
++#include <sys/system_properties.h>
+ #include <EGL/egl.h>
+ #include <media/NdkImageReader.h>
+ #include <android/native_window_jni.h>
+@@ -51,6 +53,7 @@
+     media_status_t (*AImageReader_acquireLatestImage)(AImageReader *, AImage **);
+     void (*AImageReader_delete)(AImageReader *);
+     media_status_t (*AImage_getHardwareBuffer)(const AImage *, AHardwareBuffer **);
++    media_status_t (*AImage_getTimestamp)(const AImage *, int64_t *);
+     void (*AImage_delete)(AImage *);
+     void (*AHardwareBuffer_describe)(const AHardwareBuffer *, AHardwareBuffer_Desc *);
+     jobject (*ANativeWindow_toSurface)(JNIEnv *, ANativeWindow *);
+@@ -66,6 +69,10 @@
+     mp_mutex lock;
+     mp_cond cond;
+     bool image_available;
++    bool trace_maps;
++    unsigned long long map_count;
++    unsigned long long acquired_count;
++    unsigned long long deleted_count;
+ 
+     EGLImageKHR (EGLAPIENTRY *CreateImageKHR)(
+         EGLDisplay, EGLContext, EGLenum, EGLClientBuffer, const EGLint *);
+@@ -82,6 +89,7 @@
+     { "AImageReader_acquireLatestImage", offsetof(struct priv_owner, AImageReader_acquireLatestImage) },
+     { "AImageReader_delete", offsetof(struct priv_owner, AImageReader_delete) },
+     { "AImage_getHardwareBuffer", offsetof(struct priv_owner, AImage_getHardwareBuffer) },
++    { "AImage_getTimestamp", offsetof(struct priv_owner, AImage_getTimestamp) },
+     { "AImage_delete", offsetof(struct priv_owner, AImage_delete) },
+     { "AHardwareBuffer_describe", offsetof(struct priv_owner, AHardwareBuffer_describe) },
+     { "ANativeWindow_toSurface", offsetof(struct priv_owner, ANativeWindow_toSurface) },
+@@ -233,6 +241,10 @@
+     GL *gl = ra_gl_get(mapper->ra);
+ 
+     p->log = mapper->log;
++    char map_trace_property[PROP_VALUE_MAX] = {0};
++    p->trace_maps =
++        __system_property_get("debug.media_kit.map_trace", map_trace_property) > 0 &&
++        strcmp(map_trace_property, "1") == 0;
+     mp_mutex_init(&p->lock);
+     mp_cond_init(&p->cond);
+ 
+@@ -317,6 +329,7 @@
+     if (p->image) {
+         o->AImage_delete(p->image);
+         p->image = NULL;
++        p->deleted_count++;
+     }
+ }
+ 
+@@ -325,12 +338,16 @@
+     struct priv *p = mapper->priv;
+     struct priv_owner *o = mapper->owner->priv;
+     GL *gl = ra_gl_get(mapper->ra);
++    p->map_count++;
+ 
+     {
+         if (mapper->src->imgfmt != IMGFMT_MEDIACODEC)
+             return -1;
+         AVMediaCodecBuffer *buffer = (AVMediaCodecBuffer *)mapper->src->planes[3];
+-        av_mediacodec_release_buffer(buffer, 1);
++        int release_ret = av_mediacodec_release_buffer(buffer, 1);
++        if (p->trace_maps && release_ret < 0)
++            MP_ERR(mapper, "MEDIA_KIT_MAP release_failed=%d pts=%.6f\n",
++                   release_ret, mapper->src->pts);
+     }
+ 
+     // A queued callback does not guarantee an image is still available.
+@@ -352,6 +369,15 @@
+         return -1;
+     }
+     mp_assert(p->image);
++    p->acquired_count++;
++    if (p->trace_maps && p->acquired_count % 30 == 0) {
++        int64_t image_timestamp_ns = 0;
++        media_status_t timestamp_ret =
++            o->AImage_getTimestamp(p->image, &image_timestamp_ns);
++        MP_ERR(mapper, "MEDIA_KIT_MAP calls=%llu acquired=%llu deleted=%llu pts=%.6f image_timestamp_ns=%lld timestamp_ret=%d\n",
++               p->map_count, p->acquired_count, p->deleted_count,
++               mapper->src->pts, (long long)image_timestamp_ns, timestamp_ret);
++    }
+ 
+     AHardwareBuffer *hwbuf = NULL;
+     ret = o->AImage_getHardwareBuffer(p->image, &hwbuf);

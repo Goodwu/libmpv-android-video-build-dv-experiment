@@ -56,9 +56,10 @@ if [ ! -d libx264 ]; then
 fi
 verify_sha libx264 $v_libx264
 
-# ffmpeg
+# ffmpeg（Goodwu fork：n7.1.3 基底 + P5 逐帧 RPU 元数据默认传递，即产品链 fff3ee7 世代）
 if [ ! -d ffmpeg ]; then
-	git clone --depth 1 --branch n$v_ffmpeg https://github.com/FFmpeg/FFmpeg.git ffmpeg
+	git clone https://github.com/Goodwu/FFmpeg.git ffmpeg
+	git -C ffmpeg checkout $v_ffmpeg
 fi
 verify_sha ffmpeg $sha_ffmpeg
 

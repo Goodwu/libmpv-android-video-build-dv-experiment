@@ -1,0 +1,37 @@
+diff --git a/video/out/vo_gpu_next.c b/video/out/vo_gpu_next.c
+index 3f0b18f..02e6214 100644
+--- a/video/out/vo_gpu_next.c
++++ b/video/out/vo_gpu_next.c
+@@ -19,6 +19,9 @@
+ 
+ #include <sys/stat.h>
+ #include <time.h>
++#ifdef __ANDROID__
++#include <sys/system_properties.h>
++#endif
+ 
+ #include <libplacebo/colorspace.h>
+ #include <libplacebo/options.h>
+@@ -671,6 +674,22 @@ static bool map_frame(pl_gpu gpu, pl_tex *tex, const struct pl_source_frame *src
+         .user_data = mpi,
+     };
+ 
++#ifdef __ANDROID__
++    {
++        static int p5_probe_frames;
++        char property[PROP_VALUE_MAX] = { 0 };
++        if (p5_probe_frames < 5 &&
++            __system_property_get("debug.media_kit.p5_renderer_probe", property) > 0 &&
++            !strcmp(property, "1")) {
++            p5_probe_frames++;
++            MP_WARN(vo, "MEDIA_KIT_P5_RENDERER frame=%d source_fmt=%d source_sys=%d dovi=%d mapped_fmt=%d mapped_sys=%d mapped_dovi=%d final_sys=%d\n",
++                    p5_probe_frames, mpi->imgfmt, mpi->params.repr.sys,
++                    !!mpi->dovi, par.imgfmt, par.repr.sys, !!par.repr.dovi,
++                    frame->repr.sys);
++        }
++    }
++#endif
++
+     const struct gl_video_opts *opts = p->opts_cache->opts;
+     if (opts->hdr_reference_white && !pl_color_transfer_is_hdr(frame->color.transfer))
+         frame->color.hdr.max_luma = opts->hdr_reference_white;
