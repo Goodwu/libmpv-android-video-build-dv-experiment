@@ -47,6 +47,18 @@ cp prefix/armeabi-v7a/usr/local/lib/*.so temp/lib/armeabi-v7a/
 cp prefix/x86/usr/local/lib/*.so temp/lib/x86/
 cp prefix/x86_64/usr/local/lib/*.so temp/lib/x86_64/
 
+# Weaken the Vulkan 1.1 imports libplacebo hard-requires, so the bundled
+# libmpv.so also loads on Android API 24-27 (minSdk 24) where the system
+# libvulkan.so only exports Vulkan 1.0. Contract: the app's Android playback
+# topology never creates a Vulkan context; see
+# scripts/weaken_undefined_imports.py. Opt out only for a vulkan-VO debug
+# build, and raise the effective minSdk to API 28+ there.
+if [ "${PILIPLUSX_SKIP_VULKAN_WEAKEN:-0}" != "1" ]; then
+  for abi in arm64-v8a armeabi-v7a x86 x86_64; do
+    python3 scripts/weaken_undefined_imports.py "temp/lib/$abi/libmpv.so"
+  done
+fi
+
 cd temp
 
 FIXED_TIME="2025-01-01 00:00:00"
