@@ -53,9 +53,17 @@ cp prefix/x86_64/usr/local/lib/*.so temp/lib/x86_64/
 # topology never creates a Vulkan context; see
 # scripts/weaken_undefined_imports.py. Opt out only for a vulkan-VO debug
 # build, and raise the effective minSdk to API 28+ there.
+# DV001: since mpv c11426b67a (12030b9c39) resolves the Properties2 family
+# through vkGetInstanceProcAddr at runtime, fresh builds no longer import the
+# two Vulkan 1.1 symbols at all — weakening becomes a no-op. Skip it when the
+# symbols are absent instead of failing.
 if [ "${PILIPLUSX_SKIP_VULKAN_WEAKEN:-0}" != "1" ]; then
   for abi in arm64-v8a armeabi-v7a x86 x86_64; do
-    python3 scripts/weaken_undefined_imports.py "temp/lib/$abi/libmpv.so"
+    if nm -D --undefined-only "temp/lib/$abi/libmpv.so" 2>/dev/null | grep -q "vkGetPhysicalDeviceProperties2"; then
+      python3 scripts/weaken_undefined_imports.py "temp/lib/$abi/libmpv.so"
+    else
+      echo "DV001: $abi libmpv.so has no Vulkan 1.1 imports (resolved via vkGetInstanceProcAddr upstream); weaken step skipped"
+    fi
   done
 fi
 
