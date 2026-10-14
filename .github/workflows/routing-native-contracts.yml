@@ -1,0 +1,41 @@
+name: Routing native import contracts
+on:
+  push:
+    branches:
+      - device/MK-ROUTING-20261011/DV001
+      - routing/MK-ROUTING-20261011
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: native-contracts-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+jobs:
+  elf-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Install actual ELF fixture tools
+        run: sudo apt-get update && sudo apt-get install -y clang lld binutils
+      - name: Run all real ELF regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/native-contracts"
+          git rev-parse HEAD > "$RUNNER_TEMP/native-contracts/source.txt"
+          clang --version > "$RUNNER_TEMP/native-contracts/toolchain.txt"
+          ld.lld --version >> "$RUNNER_TEMP/native-contracts/toolchain.txt"
+          python3 -m unittest discover -s tests -v 2>&1 | tee "$RUNNER_TEMP/native-contracts/tests.log"
+          bash -n buildscripts/bundle_default.sh
+          git diff --exit-code
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-import-contracts-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/native-contracts
+          if-no-files-found: error
