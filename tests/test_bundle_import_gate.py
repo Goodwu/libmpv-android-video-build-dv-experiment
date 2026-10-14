@@ -17,6 +17,9 @@ class BundleImportGateTests(unittest.TestCase):
         self.gate = script.split('# BEGIN VALIDATED VULKAN IMPORT GATE', 1)[1].split(
             '# END VALIDATED VULKAN IMPORT GATE', 1)[0]
         self.env = dict(os.environ, PATH=str(self.root), PILIPLUSX_SKIP_VULKAN_WEAKEN='1')
+        realpath = self.root / 'realpath'
+        realpath.write_text('#!/bin/bash\nprintf "%s\\n" "$1"\n')
+        realpath.chmod(0o755)
 
     def run_gate(self):
         return subprocess.run(['/bin/bash', '-c', self.gate + '\nprintf ZIP_REACHED'],

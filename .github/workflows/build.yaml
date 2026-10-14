@@ -1,75 +1,103 @@
-name: Build libmpv-android
-
+name: Current-source Android native candidate
 on:
   push:
     branches:
-      - main
-  workflow_dispatch:
-    inputs:
-      logLevel:
-        description: 'Log level'
-        required: true
-        default: 'warning'
-      release:
-        description: 'Create draft release'
-        required: false
-        type: boolean
-        default: false
+      - device/MK-ROUTING-20261011/DV001
+      - routing/MK-ROUTING-20261011
   pull_request:
-
+  workflow_dispatch:
 permissions:
-  contents: write
-
+  contents: read
+concurrency:
+  group: routing-native-build-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 jobs:
-  build:
-    name: Build
+  native:
+    name: Build unreviewed current-source native candidate
     runs-on: ubuntu-24.04
-    container: docker.io/debian:bookworm-slim
+    timeout-minutes: 240
+    env:
+      EXPECTED_RECIPE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    defaults:
+      run:
+        shell: bash
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Install dependency
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Record the exact candidate before setup
         run: |
-          echo "deb http://deb.debian.org/debian bookworm-backports main" | tee /etc/apt/sources.list.d/bookworm-backports.list
-          apt update
-          apt install -y sudo git gcc-multilib libc-dev make automake pkg-config libtool nasm python3-jsonschema wget python3-jinja2 zip python3-pip
-          apt install -y -t bookworm-backports meson
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_RECIPE_SHA"
+          mkdir -p "$RUNNER_TEMP/native-setup"
+          printf 'recipe=%s\nrun=%s\nattempt=%s\nnativeVerified=false\ndeviceVerified=false\n' "$EXPECTED_RECIPE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > "$RUNNER_TEMP/native-setup/source.txt"
+      - name: Install host compilation and real ELF test tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y build-essential gcc-multilib autoconf automake libtool pkg-config nasm ninja-build cmake clang lld binutils python3-venv python3-jsonschema python3-jinja2 wget unzip zip
+          python3 -m venv "$RUNNER_TEMP/native-python"
+          "$RUNNER_TEMP/native-python/bin/pip" install meson jinja2 jsonschema
+          "$RUNNER_TEMP/native-python/bin/pip" freeze > "$RUNNER_TEMP/native-setup/python-tools.txt"
+          printf '%s\n' "$RUNNER_TEMP/native-python/bin" >> "$GITHUB_PATH"
+      - uses: actions/setup-java@v4
         with:
           java-version: '17'
-          distribution: 'temurin'
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-      - uses: nttld/setup-ndk@v1
-        with:
-          link-to-sdk: true
-          ndk-version: r27c
-      - name: Symlink SDK
-        working-directory: ./buildscripts
+          distribution: temurin
+      - name: Install the recipe-selected NDK in the hosted SDK
         run: |
-          mkdir sdk
-          ln -s ${ANDROID_HOME} ./sdk/android-sdk-linux
-      - name: Bundle (default)
-        working-directory: ./buildscripts
+          set -euo pipefail
+          export ENCODERS_GPL=${ENCODERS_GPL:-}
+          . buildscripts/include/depinfo.sh
+          test -d "$ANDROID_HOME"
+          manager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$manager"
+          # Use existing hosted SDK licenses. Missing licenses fail here;
+          # do not invoke the old container action's ten-second license timeout.
+          "$manager" --sdk_root="$ANDROID_HOME" "ndk;$v_ndk" 'platforms;android-35' "build-tools;$v_sdk_build_tools" 'cmake;3.22.1' </dev/null 2>&1 | tee "$RUNNER_TEMP/native-setup/sdk-install.log"
+          test -f "$ANDROID_HOME/ndk/$v_ndk/source.properties"
+          mkdir buildscripts/sdk
+          ln -s "$ANDROID_HOME" buildscripts/sdk/android-sdk-linux
+      - name: Validate all host contracts before the native build
         run: |
-          sed -i -e 's/sudo//g' *.sh
-          sed -i 's/download-sdk\.sh/download-sdk-debian\.sh/g' download.sh
-          sed -i -e '/git reset --hard/d' patch.sh
-          sudo chmod +x include/download-sdk-debian.sh
-          sudo chmod +x bundle_default.sh
-          ./bundle_default.sh
+          set -euo pipefail
+          python3 -m unittest discover -s tests -v 2>&1 | tee "$RUNNER_TEMP/native-setup/contracts.log"
+          bash -n buildscripts/bundle_default.sh
+          git diff --exit-code
+      - name: Build and package one fresh current-source vector
+        id: build
+        run: |
+          set -euo pipefail
+          bash buildscripts/bundle_default.sh
+      - name: Collect successful packaging records without changing approval
+        if: ${{ success() }}
+        run: |
+          set -euo pipefail
+          for abi in arm64-v8a armeabi-v7a x86 x86_64; do
+            cp "buildscripts/routing-native-output/$abi/packaging.json" "buildscripts/routing-native-evidence/packaging-$abi.json"
+          done
       - uses: actions/upload-artifact@v4
+        if: ${{ success() }}
         with:
-          name: artifact
-          path: /home/runner/work/libmpv-android-video-build/libmpv-android-video-build/buildscripts/*.jar
-      - uses: softprops/action-gh-release@v1
-        if: github.ref == 'refs/heads/main' || inputs.release == true
+          name: routing-native-arm64-${{ env.EXPECTED_RECIPE_SHA }}
+          path: buildscripts/routing-native-output/arm64-v8a/default-arm64-v8a.jar
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: ${{ success() }}
         with:
-          draft: true
-          prerelease: false
-          tag_name: "vnext"
-          files: |
-            /home/runner/work/libmpv-android-video-build/libmpv-android-video-build/buildscripts/*.jar
+          name: routing-native-other-abis-${{ env.EXPECTED_RECIPE_SHA }}
+          path: |
+            buildscripts/routing-native-output/armeabi-v7a/*.jar
+            buildscripts/routing-native-output/x86/*.jar
+            buildscripts/routing-native-output/x86_64/*.jar
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: routing-native-evidence-${{ env.EXPECTED_RECIPE_SHA }}
+          path: |
+            ${{ runner.temp }}/native-setup
+            buildscripts/routing-native-evidence
+            !buildscripts/routing-native-evidence/prepared/**
+          if-no-files-found: error
