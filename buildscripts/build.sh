@@ -52,7 +52,9 @@ loadarch () {
 		export AS="nasm"
 	fi
 	export CXX=$cc_triple-clang++
-	export LDFLAGS="-Wl,-O1,--icf=safe -Wl,-z,max-page-size=16384"
+	# The member packaging gate requires exactly one GNU build-id note for
+	# ELF identity; the NDK lld default emits none, so request it explicitly.
+	export LDFLAGS="-Wl,-O1,--icf=safe -Wl,-z,max-page-size=16384 -Wl,--build-id=sha1"
 	export AR=llvm-ar
 	export RANLIB=llvm-ranlib
 }
