@@ -69,7 +69,8 @@ jobs:
         id: build
         run: |
           set -euo pipefail
-          bash buildscripts/bundle_default.sh
+          # Preserve the complete driver error too, not only nested build logs.
+          bash buildscripts/bundle_default.sh 2>&1 | tee "$RUNNER_TEMP/native-setup/bundle.log"
       - name: Collect successful packaging records without changing approval
         if: ${{ success() }}
         run: |
