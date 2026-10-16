@@ -59,6 +59,14 @@ source = path.read_text()
 if source.count('android {') != 1 or 'ndkVersion' in source or 'ndkPath' in source:
     raise SystemExit('helper Android DSL changed; explicit NDK binding needs review')
 path.write_text(source.replace('android {', 'android {\n    ndkVersion "' + version + '"', 1))
+cmake = Path('deps/media-kit-android-helper/app/src/main/cpp/CMakeLists.txt')
+cmake_source = cmake.read_text()
+# The member packaging gate requires exactly one GNU build-id note per ELF;
+# upstream suppresses it (`--build-id=none`), so the driver-side override
+# requests an explicit identity for the helper member as well.
+if cmake_source.count('--build-id=none') != 1:
+    raise SystemExit('helper CMake build-id suppression changed; override needs review')
+cmake.write_text(cmake_source.replace('--build-id=none', '--build-id=sha1', 1))
 PY
 git -C deps/media-kit-android-helper diff --binary --no-ext-diff --no-textconv HEAD -- > "$EVIDENCE/helper-ndk-override.patch"
 (

@@ -36,8 +36,10 @@ class BundlePipelineTests(unittest.TestCase):
             'if "--output" in sys.argv: pathlib.Path(sys.argv[sys.argv.index("--output")+1]).write_text("{}")\n')
         (self.bs / 'flavors/default.sh').write_text('fixture flavor\n')
         self.executable(self.bs / 'include/download-deps.sh',
-            'mkdir -p deps/media-kit-android-helper/app\n'
+            'mkdir -p deps/media-kit-android-helper/app/src/main/cpp\n'
             'printf "android {\\n}\\n" > deps/media-kit-android-helper/app/build.gradle\n'
+            'printf "add_link_options(\"LINKER:--build-id=none\")\\n" > '
+            'deps/media-kit-android-helper/app/src/main/cpp/CMakeLists.txt\n'
             'printf "#!/bin/bash\\nexit 37\\n" > deps/media-kit-android-helper/gradlew\n'
             'printf "download\\n" >> stages')
         self.executable(self.bs / 'patch.sh', 'printf "patch\\n" >> stages')
@@ -81,6 +83,15 @@ class BundlePipelineTests(unittest.TestCase):
     def test_helper_failure_stops_before_packaging(self):
         self.assert_failed(37)
         self.assertFalse((self.bs / 'routing-native-evidence/prepared').exists())
+
+    def test_helper_cmake_build_id_override_applies_before_build(self):
+        # The member packaging gate requires one GNU build-id per ELF while
+        # upstream suppresses it; the driver must flip the suppression
+        # before the helper build runs.
+        self.run_bundle()
+        cmake = (self.bs / 'deps/media-kit-android-helper/app/src/main/cpp/CMakeLists.txt').read_text()
+        self.assertIn('--build-id=sha1', cmake)
+        self.assertNotIn('--build-id=none', cmake)
 
     def test_capture_failure_never_falls_back_to_recipe_defaults(self):
         (self.bs / 'scripts/current_native_sources.py').write_text('raise SystemExit(41)\n')
