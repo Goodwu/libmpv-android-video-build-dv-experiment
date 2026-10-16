@@ -52,7 +52,9 @@ loadarch () {
 		export AS="nasm"
 	fi
 	export CXX=$cc_triple-clang++
-	export LDFLAGS="-Wl,-O1,--icf=safe -Wl,-z,max-page-size=16384"
+	# The member packaging gate requires exactly one GNU build-id note for
+	# ELF identity; the NDK lld default emits none, so request it explicitly.
+	export LDFLAGS="-Wl,-O1,--icf=safe -Wl,-z,max-page-size=16384 -Wl,--build-id=sha1"
 	export AR=llvm-ar
 	export RANLIB=llvm-ranlib
 }
@@ -110,8 +112,10 @@ build () {
 	printf >&2 '\e[1;34m%s\e[m\n' "Building $1..."
 	pushd deps/$1
 	BUILDSCRIPT=../../scripts/$1.sh
-	[ $cleanbuild -eq 1 ] && bash "$BUILDSCRIPT" clean
-    bash "$BUILDSCRIPT" build
+	# Keep our recipe strict without exporting Bash flags into third-party
+	# configure/config.guess probes, which intentionally use nonzero status.
+	[ $cleanbuild -eq 1 ] && env -u SHELLOPTS bash -e -o pipefail "$BUILDSCRIPT" clean
+    env -u SHELLOPTS bash -e -o pipefail "$BUILDSCRIPT" build
     popd
 }
 

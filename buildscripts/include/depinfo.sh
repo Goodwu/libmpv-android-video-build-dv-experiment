@@ -13,16 +13,18 @@ v_freetype=2-13-0
 v_mbedtls=3.4.0
 v_dav1d=1.2.0
 v_libxml2=2.10.3
-v_ffmpeg=b4d2ea4ffb17c62cb84a676ed0a2dab96513c002
-v_mpv=d24c59905b81053a4c50fe59f889399e1552d9ea
-v_libplacebo=c9fd87984d2495778133f6b733635f871505a432
+# The routing bundle captures live refs once; these defaults remain only for
+# legacy callers. A current-source build verifies the captured vector twice.
+v_ffmpeg=${ROUTING_FFMPEG_SHA:-9aba43cfbee182ade060cdccbe15340a0fbe3e83}
+v_mpv=${ROUTING_MPV_SHA:-c11426b67a96747c74dfd2a1b0a0340af9696103}
+v_libplacebo=${ROUTING_LIBPLACEBO_SHA:-ea700489fbf27703d8c1f64874a1c6138f17ad28}
 v_lcms2=lcms2.17
 v_libogg=1.3.5
 v_libvorbis=1.3.7
 v_libvpx=1.13.0
 v_libx264=023112c6f2f575c72e9f26274d183b70996fb542
 v_fftools_ffi=10070acb2c090edda86dba431f6c281145ceb221
-v_media_kit_android_helper=b768ce102cfa9b5ddec618bb939d689d1b0899fa
+v_media_kit_android_helper=${ROUTING_HELPER_SHA:-b768ce102cfa9b5ddec618bb939d689d1b0899fa}
 v_gas_preprocessor=ac1836309c2e77023c228b7184485597286289d3
 
 ## Pinned commit SHAs for tag-based clones
@@ -30,7 +32,7 @@ sha_mbedtls=1873d3bfc2da771672bd8e7e8f41f57e0af77f33
 sha_dav1d=676a864a11af2c0522e1f992e770589543894686
 sha_libxml2=f507d167f1755b7eaea09fb1a44d29aab828b6d1
 sha_libvpx=d6eb9696aa72473c1a11d34d928d35a3acc0c9a9
-sha_ffmpeg=b4d2ea4ffb17c62cb84a676ed0a2dab96513c002
+sha_ffmpeg=$v_ffmpeg
 sha_freetype=de8b92dd7ec634e9e2b25ef534c54a3537555c11
 sha_fribidi=6428d8469e536bcbb6e12c7b79ba6659371c435a
 sha_harfbuzz=a321c4fee56b15247c10f9aa3db7e7ccb3b8173b

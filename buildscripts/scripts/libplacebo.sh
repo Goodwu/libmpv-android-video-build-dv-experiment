@@ -16,15 +16,11 @@ fi
 
 unset CC CXX
 
-external_yuv_patch=../../patches/libplacebo/libplacebo_external_yuv_sampler.patch
-if git apply --reverse --check "$external_yuv_patch"; then
-	true
-elif git apply --check "$external_yuv_patch"; then
-	git apply "$external_yuv_patch"
-else
-	printf >&2 'Required libplacebo patch is incompatible: %s\n' "$external_yuv_patch"
-	exit 1
-fi
+# The external YUV sampler / r32f format support is integrated upstream on
+# optimize/dovi-linear-decode since the branch rewrite (980742df, ea700489);
+# the old tree-wide patch was archived in patches-archived/ (DV001). The two
+# still-needed fixes (fix_gles_shader_compile_error, fix_shaderc_vulkan_dismatch)
+# are applied by patch.sh from patches/libplacebo/.
 
 meson setup $build --prefix=/usr/local --cross-file "$prefix_dir"/crossfile.txt \
 	-Dvulkan=enabled -Ddemos=false -Dshaderc=enabled -Dlcms=enabled

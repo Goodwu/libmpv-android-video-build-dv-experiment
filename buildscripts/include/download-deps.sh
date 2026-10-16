@@ -1,4 +1,5 @@
-#!/bin/bash -e
+#!/usr/bin/env bash
+set -eo pipefail
 
 . ./include/depinfo.sh
 
@@ -12,12 +13,13 @@ verify_sha() {
 		echo "ERROR: Commit SHA mismatch in deps/$dir"
 		echo "  Expected: $expected"
 		echo "  Got:      $actual"
-		echo "  Delete deps/$dir and re-run to get a clean copy."
+		echo "  Use a fresh checkout rather than reusing this source directory."
 		exit 1
 	fi
 }
 
-mkdir -p deps && cd deps
+mkdir -p deps
+cd deps
 
 # mbedtls
 if [ ! -d mbedtls ]; then
@@ -38,10 +40,20 @@ fi
 verify_sha libxml2 $sha_libxml2
 
 # libogg
-[ ! -d libogg ] && $WGET https://github.com/xiph/ogg/releases/download/v${v_libogg}/libogg-${v_libogg}.tar.gz && tar -xf libogg-${v_libogg}.tar.gz && mv libogg-${v_libogg} libogg && rm libogg-${v_libogg}.tar.gz
+if [ ! -d libogg ]; then
+	$WGET "https://github.com/xiph/ogg/releases/download/v${v_libogg}/libogg-${v_libogg}.tar.gz"
+	tar -xf "libogg-${v_libogg}.tar.gz"
+	mv "libogg-${v_libogg}" libogg
+	rm "libogg-${v_libogg}.tar.gz"
+fi
 
 # libvorbis
-[ ! -d libvorbis ] && $WGET https://github.com/xiph/vorbis/releases/download/v${v_libvorbis}/libvorbis-${v_libvorbis}.tar.gz && tar -xf libvorbis-${v_libvorbis}.tar.gz && mv libvorbis-${v_libvorbis} libvorbis && rm libvorbis-${v_libvorbis}.tar.gz
+if [ ! -d libvorbis ]; then
+	$WGET "https://github.com/xiph/vorbis/releases/download/v${v_libvorbis}/libvorbis-${v_libvorbis}.tar.gz"
+	tar -xf "libvorbis-${v_libvorbis}.tar.gz"
+	mv "libvorbis-${v_libvorbis}" libvorbis
+	rm "libvorbis-${v_libvorbis}.tar.gz"
+fi
 
 # libvpx
 if [ ! -d libvpx ]; then
@@ -56,12 +68,12 @@ if [ ! -d libx264 ]; then
 fi
 verify_sha libx264 $v_libx264
 
-# ffmpeg（Goodwu fork：n7.1.3 基底 + P5 逐帧 RPU 元数据默认传递，即产品链 fff3ee7 世代）
+# FFmpeg: the routing entry supplies this run's captured current commit.
 if [ ! -d ffmpeg ]; then
 	git clone https://github.com/Goodwu/FFmpeg.git ffmpeg
-	git -C ffmpeg checkout $v_ffmpeg
+	git -C ffmpeg checkout "$v_ffmpeg"
 fi
-verify_sha ffmpeg $sha_ffmpeg
+verify_sha ffmpeg "$sha_ffmpeg"
 
 # freetype2
 if [ ! -d freetype ]; then
@@ -102,17 +114,17 @@ HEREDOC
 
 if [ ! -d libplacebo ]; then
 	git clone https://github.com/Goodwu/libplacebo.git libplacebo
-	git -C libplacebo checkout $v_libplacebo
+	git -C libplacebo checkout "$v_libplacebo"
 	git -C libplacebo submodule update --init --recursive
 fi
-verify_sha libplacebo $v_libplacebo
+verify_sha libplacebo "$v_libplacebo"
 
 # mpv
 if [ ! -d mpv ]; then
 	git clone https://github.com/Goodwu/mpv.git mpv
-	git -C mpv checkout $v_mpv
+	git -C mpv checkout "$v_mpv"
 fi
-verify_sha mpv $v_mpv
+verify_sha mpv "$v_mpv"
 
 # fftools_ffi
 if [ ! -d fftools_ffi ]; then
@@ -124,8 +136,8 @@ verify_sha fftools_ffi $v_fftools_ffi
 # media-kit-android-helper
 if [ ! -d media-kit-android-helper ]; then
 	git clone https://github.com/Predidit/media-kit-android-helper.git
-	git -C media-kit-android-helper checkout $v_media_kit_android_helper
+	git -C media-kit-android-helper checkout "$v_media_kit_android_helper"
 fi
-verify_sha media-kit-android-helper $v_media_kit_android_helper
+verify_sha media-kit-android-helper "$v_media_kit_android_helper"
 
 cd ..
