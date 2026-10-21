@@ -2,8 +2,7 @@ name: Current-source Android native candidate
 on:
   push:
     branches:
-      - device/MK-ROUTING-20261011/DV001
-      - routing/MK-ROUTING-20261011
+      - feature/android-dv
   pull_request:
   workflow_dispatch:
 permissions:
