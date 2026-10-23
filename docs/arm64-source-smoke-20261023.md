@@ -85,3 +85,31 @@ interface. It does not verify the Android helper build, complete runtime JAR
 assembly, the other three native source builds, an APK build, on-device loading
 or playback. The generated verification evidence keeps runtime and device
 acceptance false.
+
+## CI source-preparation follow-up
+
+[CI run 39975646524, Android native job 120489460116](https://github.com/Goodwu/PiliPlus/actions/runs/39975646524/job/120489460116)
+subsequently completed all four native ABI builds, the Android helper build and
+the four runtime JARs. Its final package collector rejected FreeType's missing
+`subprojects/dlg` submodule before exporting the complete package. FreeType was
+correctly pinned to `de8b92dd7ec634e9e2b25ef534c54a3537555c11`; its gitlink requires
+dlg commit `d142e646e263c89f93663e027c2f0d03739ab42d`.
+
+The unchanged production `source_identity` function reproduced that rejection
+against the retained real arm64 checkout. Running the corrected dependency
+preparation initialized the pinned dlg commit, and the same identity function
+then accepted all twelve default source dependencies. The other dependency with
+submodules, libplacebo, already had all six gitlinks initialized. Dependency
+versions, runtime configuration and the final source identity gate were unchanged.
+
+The downloader now checks recursive source status before long compilation. It
+initializes missing gitlinks in both fresh and reused checkouts and rejects an
+existing changed or conflicted submodule without resetting it. Real nested Git
+fixtures verified pinned-commit selection despite a newer branch tip, recovery
+of a missing nested checkout, rejection of a changed nested commit, and a fetch
+failure. The complete repository suite passed **79 tests**.
+
+This CI log proves compilation and JAR assembly for four ABIs; it does not by
+itself prove a completed four-ABI development SDK package or an application
+build. Those remain subject to the unchanged final package and application gates
+on the next run.

@@ -7,7 +7,7 @@ set -eo pipefail
 
 verify_sha() {
 	local dir="$1" expected="$2"
-	local actual
+	local actual submodules
 	actual=$(git -C "$dir" rev-parse HEAD)
 	if [ "$actual" != "$expected" ]; then
 		echo "ERROR: Commit SHA mismatch in deps/$dir"
@@ -15,6 +15,23 @@ verify_sha() {
 		echo "  Got:      $actual"
 		echo "  Use a fresh checkout rather than reusing this source directory."
 		exit 1
+	fi
+	# A pinned parent also pins every recursive gitlink. Prepare missing
+	# submodules before a long build, including already-cloned dependencies.
+	submodules=$(git -C "$dir" submodule status --recursive)
+	if [ -n "$submodules" ]; then
+		if grep -Eq '^[+U]' <<<"$submodules"; then
+			echo "ERROR: Changed source submodule in deps/$dir; use a fresh checkout."
+			printf '%s\n' "$submodules"
+			exit 1
+		fi
+		git -C "$dir" submodule update --init --recursive
+		submodules=$(git -C "$dir" submodule status --recursive)
+		if grep -Eq '^[-+U]' <<<"$submodules"; then
+			echo "ERROR: Incomplete pinned source submodules in deps/$dir"
+			printf '%s\n' "$submodules"
+			exit 1
+		fi
 	fi
 }
 
@@ -35,7 +52,7 @@ verify_sha dav1d $sha_dav1d
 
 # libxml2
 if [ ! -d libxml2 ]; then
-	git clone --depth 1 --branch v$v_libxml2 --recurse-submodules https://github.com/GNOME/libxml2.git libxml2
+	git clone --depth 1 --branch v$v_libxml2 https://github.com/GNOME/libxml2.git libxml2
 fi
 verify_sha libxml2 $sha_libxml2
 
@@ -115,7 +132,6 @@ HEREDOC
 if [ ! -d libplacebo ]; then
 	git clone https://github.com/Goodwu/libplacebo.git libplacebo
 	git -C libplacebo checkout "$v_libplacebo"
-	git -C libplacebo submodule update --init --recursive
 fi
 verify_sha libplacebo "$v_libplacebo"
 

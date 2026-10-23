@@ -39,6 +39,13 @@ moving branch's latest tip. Its evidence says `locked-source-checked`, not
 `current-source-checked`. This explicit mode does not authorize reuse of an old
 prefix or JAR as the result of a new source build.
 
+Dependency preparation also validates each Git dependency's parent commit,
+initializes missing recursive submodules at the recorded gitlinks, and checks
+their status before compilation. An already-initialized submodule at a different
+commit or in conflict is rejected without resetting it. Fetch failures and any
+remaining uninitialized submodules stop preparation. The final collector repeats
+its independent source identity check after the build.
+
 ## Collect a complete package
 
 After a successful bundle build, run:
