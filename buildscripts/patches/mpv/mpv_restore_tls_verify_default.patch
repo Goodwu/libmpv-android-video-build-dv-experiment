@@ -1,45 +1,36 @@
 From: Predidit <34627277+Predidit@users.noreply.github.com>
-Subject: [PATCH] network: restore the legacy TLS verification default
+Subject: [PATCH] stream_lavf: document and retain the legacy TLS default
 
-Keep mpv and libmpv compatible with this project's previous builds, which
-disabled certificate verification by default. Explicit tls-verify=yes
-continues to work. This deliberately trades HTTPS authentication for
-backwards compatibility; document that in the bundled manual as well.
+The locked media-kit/android source keeps network options in stream_lavf.c,
+not the newer stream/network.c. Its omitted bool initializer already defaults
+to false. Make that existing value explicit and retain the recipe's manual
+notice; this adaptation does not change the locked source's TLS behavior.
+Explicit tls-verify=yes continues to work.
 
 diff --git a/DOCS/man/options.rst b/DOCS/man/options.rst
-index f0b9f7f83..a03d57402 100644
 --- a/DOCS/man/options.rst
 +++ b/DOCS/man/options.rst
-@@ -5746,14 +5746,14 @@ Network
+@@ -5606,9 +5606,12 @@ Network
+     Certificate authority database file for use with TLS. (Silently fails with
+     older FFmpeg versions.)
  
- ``--tls-verify=<yes|no>``
-     Verify peer certificates when using TLS (e.g. with ``https://...``)
--    (default: yes*). Disabling this option allows man-in-the-middle attacks
--    to silently substitute the content of an HTTPS stream and is only
-+    (default in this build: no). Disabling this option allows man-in-the-middle
-+    attacks to silently substitute the content of an HTTPS stream and is only
-     recommended as a per-stream override when verification fails for a
-     known-good reason (e.g. an outdated CA bundle, a corporate proxy, a
-     development server with a self-signed certificate).
- 
--    This is disabled by default, if mpv is built without libcurl and
--    libavformat is older than 63.0.100.
-+    This build disables verification by default for backwards compatibility.
-+    Use ``--tls-verify=yes`` with a trusted ``--tls-ca-file`` to enable it.
+-``--tls-verify``
++``--tls-verify=<yes|no>``
+     Verify peer certificates when using TLS (e.g. with ``https://...``).
+     (Silently fails with older FFmpeg versions.)
++    This build retains the legacy default of no certificate verification.
++    Disabling verification permits man-in-the-middle substitution of HTTPS
++    content. Use ``--tls-verify=yes`` with a trusted ``--tls-ca-file`` to enable it.
  
  ``--tls-cert-file``
      A file containing a certificate to use in the handshake with the
-diff --git a/stream/network.c b/stream/network.c
-index 0087d3846..68dca9f59 100644
---- a/stream/network.c
-+++ b/stream/network.c
-@@ -51,9 +51,7 @@ const struct m_sub_options mp_network_conf = {
-     .defaults = &(const struct mp_network_opts){
+diff --git a/stream/stream_lavf.c b/stream/stream_lavf.c
+--- a/stream/stream_lavf.c
++++ b/stream/stream_lavf.c
+@@ -73,6 +73,7 @@ const struct m_sub_options stream_lavf_conf = {
+     .defaults = &(const struct stream_lavf_params){
          .useragent = "libmpv",
          .timeout = 60,
--#if HAVE_LIBCURL || LIBAVFORMAT_VERSION_MAJOR >= 63
--        .tls_verify = true,
--#endif
 +        .tls_verify = false,
      },
  };
