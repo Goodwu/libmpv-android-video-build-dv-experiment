@@ -35,13 +35,18 @@ def remote_tip(url, branch):
     return pair[0]
 
 
-def validate(vector):
+def validate(vector, *, locked=False):
     if not isinstance(vector, dict) or set(vector) != set(SOURCES):
         raise ValueError('source vector must contain exactly four registered components')
     for name, (url, branch, _) in SOURCES.items():
         row = vector[name]
-        if not isinstance(row, dict) or set(row) != {'repository', 'branch', 'commit'} or row['repository'] != url or row['branch'] != branch or not isinstance(row['commit'], str) or not HEX.fullmatch(row['commit']):
+        if not isinstance(row, dict) or set(row) != {'repository', 'branch', 'commit'} or row['repository'] != url or not isinstance(row['commit'], str) or not HEX.fullmatch(row['commit']):
             raise ValueError(f'invalid source identity for {name}')
+        label = row['branch']
+        if (not isinstance(label, str) or not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_./-]*', label)
+                or '..' in label or '//' in label or label.endswith(('/', '.'))
+                or (not locked and label != branch)):
+            raise ValueError(f'invalid source branch for {name}')
     return vector
 
 
@@ -50,13 +55,13 @@ def capture():
             for name, (url, branch, _) in SOURCES.items()}
 
 
-def exports(vector):
-    validate(vector)
+def exports(vector, *, locked=False):
+    validate(vector, locked=locked)
     return ''.join(f"export {variable}={vector[name]['commit']}\n" for name, (_, _, variable) in SOURCES.items())
 
 
-def check(vector, deps):
-    validate(vector)
+def check(vector, deps, *, locked=False):
+    validate(vector, locked=locked)
     result = {}
     for name, (url, branch, _) in SOURCES.items():
         root = (Path(deps) / name).resolve(strict=True)
@@ -64,7 +69,7 @@ def check(vector, deps):
         actual = command(['git', '-C', str(root), 'rev-parse', 'HEAD']).strip()
         if actual_root != root or actual != vector[name]['commit']:
             raise ValueError(f'checkout does not match captured current source: {name}')
-        if remote_tip(url, branch) != actual:
+        if not locked and remote_tip(url, branch) != actual:
             raise ValueError(f'remote source advanced during this build: {name}')
         origin = command(['git', '-C', str(root), 'remote', 'get-url', 'origin']).strip()
         if origin != url:
@@ -78,29 +83,36 @@ def check(vector, deps):
         diff = command(['git', '-C', str(root), 'diff', '--binary', '--no-ext-diff', '--no-textconv', 'HEAD', '--'])
         result[name] = dict(vector[name], tree=tree, submodules=submodules, trackedDiff=diff,
                             trackedDiffSha256=hashlib.sha256(diff.encode()).hexdigest())
-    return {'status': 'current-source-checked', 'components': result}
+    return {'status': 'locked-source-checked' if locked else 'current-source-checked', 'components': result}
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=('capture', 'exports', 'check'))
+    parser.add_argument('action', choices=('capture', 'lock', 'exports', 'check'))
     parser.add_argument('--input', type=Path)
     parser.add_argument('--output', type=Path)
     parser.add_argument('--deps', type=Path)
+    parser.add_argument('--locked', action='store_true',
+                        help='verify an explicit locked source vector instead of current remote tips')
     args = parser.parse_args()
     try:
         if args.action == 'capture':
+            if args.locked:
+                raise ValueError('capture always records current refs; use lock for explicit inputs')
             value = capture()
         else:
             if args.input is None:
                 raise ValueError('an explicit captured input is required')
             vector = json.loads(args.input.read_text())
-            if args.action == 'exports':
-                print(exports(vector), end='')
+            if args.action == 'lock':
+                value = validate(vector, locked=True)
+            elif args.action == 'exports':
+                print(exports(vector, locked=args.locked), end='')
                 raise SystemExit(0)
-            if args.deps is None:
-                raise ValueError('an explicit dependency checkout root is required')
-            value = check(vector, args.deps)
+            else:
+                if args.deps is None:
+                    raise ValueError('an explicit dependency checkout root is required')
+                value = check(vector, args.deps, locked=args.locked)
         if args.output is None:
             raise ValueError('an explicit new evidence output is required')
         with args.output.open('x') as stream:

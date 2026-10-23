@@ -29,7 +29,7 @@ class BundlePipelineTests(unittest.TestCase):
         tools = ndk / 'toolchains/llvm/prebuilt/linux-x86_64/bin'
         tools.mkdir(parents=True)
         (ndk / 'source.properties').write_text('Pkg.Revision = 27.2.12479018\n')
-        for name in ('clang', 'llvm-nm', 'llvm-readelf'):
+        for name in ('clang', 'llvm-nm', 'llvm-readelf', 'llvm-dis'):
             self.executable(tools / name, 'exit 0')
         (self.bs / 'scripts/current_native_sources.py').write_text(
             'import pathlib,sys\n'
@@ -49,8 +49,8 @@ class BundlePipelineTests(unittest.TestCase):
         path.write_text('#!/bin/bash\n' + body + '\n')
         path.chmod(0o755)
 
-    def run_bundle(self):
-        return subprocess.run(['/bin/bash', str(self.bs / 'bundle_default.sh')], env=self.env,
+    def run_bundle(self, *args):
+        return subprocess.run(['/bin/bash', str(self.bs / 'bundle_default.sh'), *args], env=self.env,
                               capture_output=True, text=True, timeout=15)
 
     def assert_failed(self, code):
@@ -99,7 +99,7 @@ class BundlePipelineTests(unittest.TestCase):
         self.assertFalse((self.bs / 'stages').exists())
 
     def test_existing_build_directories_are_preserved_and_rejected(self):
-        for name in ('deps', 'prefix', 'temp', 'routing-native-output'):
+        for name in ('deps', 'prefix', 'temp', 'routing-native-output', 'routing-native-package'):
             with self.subTest(name=name):
                 folder = self.bs / name
                 folder.mkdir()
@@ -110,6 +110,30 @@ class BundlePipelineTests(unittest.TestCase):
                 self.assertEqual(old.read_bytes(), b'preserve')
                 old.unlink()
                 folder.rmdir()
+
+    def test_explicit_source_lock_selects_locked_mode_without_hiding_stage_failure(self):
+        lock = self.root / 'locked.json'
+        lock.write_text('{}')
+        self.executable(self.bs / 'include/download-deps.sh', 'exit 31')
+        result = self.run_bundle('--source-lock', str(lock))
+        self.assertEqual(result.returncode, 31, result.stdout + result.stderr)
+        self.assertEqual((self.bs / 'routing-native-evidence/source-mode.txt').read_text(), 'locked-source\n')
+        self.assertFalse((self.bs / 'routing-native-output').exists())
+
+    def test_source_lock_does_not_allow_a_reused_prefix(self):
+        lock = self.root / 'locked.json'
+        lock.write_text('{}')
+        prefix = self.bs / 'prefix'
+        prefix.mkdir()
+        (prefix / 'old.a').write_bytes(b'keep')
+        result = self.run_bundle('--source-lock', str(lock))
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual((prefix / 'old.a').read_bytes(), b'keep')
+
+    def test_missing_source_lock_fails_before_creating_evidence(self):
+        result = self.run_bundle('--source-lock', str(self.root / 'missing.json'))
+        self.assertEqual(result.returncode, 2)
+        self.assertFalse((self.bs / 'routing-native-evidence').exists())
 
     def test_wrong_ndk_version_fails_before_dependency_download(self):
         props = self.bs / 'sdk/android-sdk-linux/ndk/27.2.12479018/source.properties'

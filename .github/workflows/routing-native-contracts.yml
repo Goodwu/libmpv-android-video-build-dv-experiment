@@ -20,7 +20,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Install actual ELF and Autoconf fixture tools
-        run: sudo apt-get update && sudo apt-get install -y clang lld binutils autoconf autotools-dev
+        run: sudo apt-get update && sudo apt-get install -y clang lld binutils autoconf autotools-dev pkg-config
       - name: Run all real ELF and build-boundary regression tests
         shell: bash
         run: |

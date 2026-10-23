@@ -13,11 +13,12 @@ for dep_path in "${PATCHES[@]}"; do
         echo "Patching $dep"
         for patch in "${patches[@]}"; do
             echo "Applying $patch"
-            if git apply --reverse --check "$ROOT/$patch"; then
+            if git apply --reverse --check "$ROOT/$patch" 2>/dev/null; then
                 echo "Already applied: $patch"
-            elif git apply --check "$ROOT/$patch"; then
+            elif git apply --check "$ROOT/$patch" 2>/dev/null; then
                 git apply "$ROOT/$patch"
             else
+                git apply --check "$ROOT/$patch" >&2 || true
                 printf >&2 'Required patch is incompatible: %s\n' "$patch"
                 exit 1
             fi

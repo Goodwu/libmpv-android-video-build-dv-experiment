@@ -1,12 +1,24 @@
 #!/usr/bin/env bash
 set -eo pipefail
 export SHELLOPTS
+source_lock=
+if [ "$#" -ne 0 ]; then
+  if [ "$#" -ne 2 ] || [ "$1" != '--source-lock' ]; then
+    printf >&2 'Usage: bundle_default.sh [--source-lock <four-component-vector.json>]\n'
+    exit 2
+  fi
+  if [ ! -f "$2" ] || [ -L "$2" ]; then
+    printf >&2 'Source lock must be an existing regular file.\n'
+    exit 2
+  fi
+  source_lock=$(realpath -- "$2")
+fi
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ROOT="$PWD"
 EVIDENCE="$ROOT/routing-native-evidence"
 OUTPUT="$ROOT/routing-native-output"
 # Never delete a user's build tree or reuse an old prefix/JAR as a new result.
-for path in deps prefix temp routing-native-evidence routing-native-output; do
+for path in deps prefix temp routing-native-evidence routing-native-output routing-native-package routing-native-package.tar.gz; do
   if [ -e "$path" ] || [ -L "$path" ]; then
     printf >&2 'Fresh checkout required; refusing existing build path: %s\n' "$path"
     exit 2
@@ -23,8 +35,16 @@ trap 'rc=$?; printf "%s\n" "$rc" > "$EVIDENCE/exit-code.txt"' EXIT
 git rev-parse HEAD > "$EVIDENCE/recipe-commit.txt"
 git rev-parse 'HEAD^{tree}' > "$EVIDENCE/recipe-tree.txt"
 
-python3 scripts/current_native_sources.py capture --output "$EVIDENCE/source-vector.json"
-python3 scripts/current_native_sources.py exports --input "$EVIDENCE/source-vector.json" > "$EVIDENCE/source.env"
+source_checks=()
+if [ -n "$source_lock" ]; then
+  python3 scripts/current_native_sources.py lock --input "$source_lock" --output "$EVIDENCE/source-vector.json"
+  source_checks=(--locked)
+  printf '%s\n' 'locked-source' > "$EVIDENCE/source-mode.txt"
+else
+  python3 scripts/current_native_sources.py capture --output "$EVIDENCE/source-vector.json"
+  printf '%s\n' 'current-source' > "$EVIDENCE/source-mode.txt"
+fi
+python3 scripts/current_native_sources.py exports --input "$EVIDENCE/source-vector.json" "${source_checks[@]}" > "$EVIDENCE/source.env"
 . "$EVIDENCE/source.env"
 . include/depinfo.sh
 NDK="$ROOT/sdk/android-sdk-linux/ndk/$v_ndk"
@@ -34,16 +54,17 @@ test -f "$NDK/source.properties"
 grep -Fxq "Pkg.Revision = $v_ndk" "$NDK/source.properties"
 test -x "$TOOLCHAIN/bin/llvm-readelf"
 test -x "$TOOLCHAIN/bin/llvm-nm"
+test -x "$TOOLCHAIN/bin/llvm-dis"
 cp "$NDK/source.properties" "$EVIDENCE/ndk-source.properties"
 "$TOOLCHAIN/bin/clang" --version > "$EVIDENCE/compiler-version.txt"
-sha256sum "$TOOLCHAIN/bin/clang" "$NDK/source.properties" > "$EVIDENCE/toolchain-files.sha256"
+sha256sum "$TOOLCHAIN/bin/clang" "$TOOLCHAIN/bin/llvm-dis" "$NDK/source.properties" > "$EVIDENCE/toolchain-files.sha256"
 
 bash -e -o pipefail include/download-deps.sh 2>&1 | tee "$EVIDENCE/download.log"
 bash -e -o pipefail patch.sh 2>&1 | tee "$EVIDENCE/patch.log"
 git ls-files -z -- patches | xargs -0 -r sha256sum > "$EVIDENCE/recipe-patches.sha256"
 cp flavors/default.sh scripts/ffmpeg.sh
 sha256sum flavors/default.sh scripts/ffmpeg.sh > "$EVIDENCE/ffmpeg-flavor.sha256"
-python3 scripts/current_native_sources.py check --input "$EVIDENCE/source-vector.json" --deps deps --output "$EVIDENCE/source-before-build.json"
+python3 scripts/current_native_sources.py check --input "$EVIDENCE/source-vector.json" --deps deps --output "$EVIDENCE/source-before-build.json" "${source_checks[@]}"
 bash -e -o pipefail build.sh 2>&1 | tee "$EVIDENCE/native-build.log"
 
 # Explicit, source-recorded helper NDK selection, rather than AGP's default NDK.
@@ -102,7 +123,7 @@ for suffix in -arm64 '' -x86 -x64; do
   cp "$build/.ninja_log" "$EVIDENCE/mpv-ninja-log${suffix:-armv7}.txt"
 done
 find prefix -type f -name '*.a' -print0 | sort -z | xargs -0 -r sha256sum > "$EVIDENCE/static-link-inputs.sha256"
-python3 scripts/current_native_sources.py check --input "$EVIDENCE/source-vector.json" --deps deps --output "$EVIDENCE/source-after-build.json"
+python3 scripts/current_native_sources.py check --input "$EVIDENCE/source-vector.json" --deps deps --output "$EVIDENCE/source-after-build.json" "${source_checks[@]}"
 test "$(git rev-parse HEAD)" = "$(cat "$EVIDENCE/recipe-commit.txt")"
 test ! -e "$OUTPUT"
 mv "$EVIDENCE/prepared" "$OUTPUT"
