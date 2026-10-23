@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import subprocess
 import sys
 import tempfile
@@ -35,6 +36,31 @@ class CurrentSourcesTests(unittest.TestCase):
             vector['ffmpeg'][field] = 'replacement'
             with self.assertRaises(ValueError):
                 sources.validate(vector)
+
+    def test_explicit_lock_accepts_isolated_branch_but_keeps_repository_and_sha_gates(self):
+        vector = self.vector()
+        vector['mpv']['branch'] = 'codex/piliplus-dovi-capabilities-20261023'
+        with self.assertRaises(ValueError):
+            sources.exports(vector)
+        self.assertIn('export ROUTING_MPV_SHA=' + '2' * 40, sources.exports(vector, locked=True))
+        for field, value in [('repository', 'https://example.invalid/replacement.git'),
+                             ('commit', 'main'), ('branch', 'bad;command')]:
+            changed = {name: dict(row) for name, row in vector.items()}
+            changed['mpv'][field] = value
+            with self.assertRaises(ValueError):
+                sources.validate(changed, locked=True)
+
+    def test_lock_cli_copies_validated_identity_without_resolving_remote_tips(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            vector = self.vector()
+            vector['mpv']['branch'] = 'codex/isolated'
+            (root / 'input.json').write_text(json.dumps(vector))
+            result = subprocess.run([sys.executable, str(ROOT / 'buildscripts/scripts/current_native_sources.py'),
+                                     'lock', '--input', str(root / 'input.json'),
+                                     '--output', str(root / 'locked.json')], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads((root / 'locked.json').read_text()), vector)
 
     def test_missing_ambiguous_or_wrong_remote_ref_is_rejected(self):
         for output in ('', '1' * 40 + '\trefs/heads/other', '1' * 40 + '\trefs/heads/main\n' + '2' * 40 + '\trefs/heads/main'):
@@ -75,6 +101,10 @@ class CurrentSourcesTests(unittest.TestCase):
                 self.assertEqual(receipt['status'], 'current-source-checked')
                 self.assertEqual(set(receipt['components']), set(vector))
                 self.assertIn('+modified fixture', receipt['components']['mpv']['trackedDiff'])
+                with patch.object(sources, 'remote_tip', side_effect=AssertionError('locked build must not query a tip')):
+                    locked = sources.check(vector, deps, locked=True)
+                    self.assertEqual(locked['status'], 'locked-source-checked')
+                    self.assertEqual(locked['components'], receipt['components'])
                 subprocess.run(['git', '-C', str(deps / 'ffmpeg'), 'remote', 'set-url', 'origin', 'wrong'], check=True)
                 with self.assertRaisesRegex(ValueError, 'origin differs'):
                     sources.check(vector, deps)

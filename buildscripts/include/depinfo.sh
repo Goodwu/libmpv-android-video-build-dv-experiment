@@ -5,6 +5,7 @@
 v_sdk=9123335_latest
 v_ndk=27.2.12479018
 v_sdk_build_tools=34.0.0
+v_android_api=26
 
 v_libass=0.17.1
 v_harfbuzz=7.2.0
