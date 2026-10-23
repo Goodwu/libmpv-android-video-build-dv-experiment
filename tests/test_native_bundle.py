@@ -75,6 +75,18 @@ class NativeBundleTests(unittest.TestCase):
                                    trackedDiffSha256=hashlib.sha256(b'').hexdigest())
         (evidence / 'source-vector.json').write_text(json.dumps(vector))
         (evidence / 'source-after-build.json').write_text(json.dumps({'status': 'current-source-checked', 'components': after}))
+        # The collector asks the selected compiler for its target triple and
+        # library lookup. These ELF fixtures use real host Clang cross targets;
+        # actual Android/NDK source builds are tested by the producer workflow.
+        toolchain = self.root / 'sdk/android-sdk-linux/ndk/27.2.12479018/toolchains/llvm/prebuilt/fixture/bin'
+        toolchain.mkdir(parents=True)
+        triples = {'arm64-v8a': 'aarch64-linux-gnu', 'armeabi-v7a': 'armv7a-linux-gnueabi',
+                   'x86': 'i686-linux-gnu', 'x86_64': 'x86_64-linux-gnu'}
+        for abi, triple in triples.items():
+            compiler = toolchain / (bundle.NDK_TARGETS[abi] + '26-clang')
+            compiler.write_text('#!/bin/sh\nexec ' + shlex.quote(shutil.which('clang')) +
+                                ' --target=' + shlex.quote(triple) + ' "$@"\n')
+            compiler.chmod(0o755)
         for abi, (_, _, suffix) in bundle.ABIS.items():
             native, static = self.binary[abi]
             output = self.root / 'routing-native-output' / abi
@@ -186,6 +198,16 @@ class NativeBundleTests(unittest.TestCase):
         (self.root / 'prefix/x86_64/include/mpv/client.h').unlink()
         with self.assertRaisesRegex(ValueError, 'SDK is incomplete'):
             self.collect()
+
+    def test_linker_host_paths_in_pkgconfig_are_rejected(self):
+        pc = self.root / 'prefix/arm64-v8a/lib/pkgconfig/mpv.pc'
+        original = pc.read_text()
+        for flag in ('-Wl,-rpath,/opt/host', '-Wl,/opt/host/libfoo.a'):
+            with self.subTest(flag=flag):
+                pc.write_text(original + 'Libs.private: ' + flag + '\n')
+                with self.assertRaisesRegex(ValueError, 'non-relocatable'):
+                    self.collect()
+                self.assertFalse(self.output.exists())
 
     def test_different_fork_capability_between_abis_is_rejected(self):
         config = self.root / 'deps/mpv/_build-x86/config.h'

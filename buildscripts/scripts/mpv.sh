@@ -15,6 +15,12 @@ else
 	exit 255
 fi
 
+# Meson 1.6 cannot run Android target code to discover Vulkan's version.
+# Keep mpv's version requirement, using metadata proved by this ABI's compiler.
+python3 ../../scripts/ndk_vulkan_pkgconfig.py --compiler "$CC" \
+	--output "$prefix_dir/lib/pkgconfig/vulkan.pc" \
+	--evidence "../../routing-native-evidence/vulkan$ndk_suffix.json"
+
 unset CC CXX # meson wants these unset
 
 sed -i -e "s/meson.build_options()/''/" meson.build

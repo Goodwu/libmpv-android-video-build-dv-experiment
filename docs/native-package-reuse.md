@@ -68,12 +68,30 @@ development headers or libraries, changed build inputs, mixed ABI archives,
 external links and build-machine paths in pkg-config metadata fail the
 collection step.
 
+For LTO archive members, the selected NDK's `llvm-dis` must report exactly the
+target triple reported by that ABI/API compiler. These members are inspected
+without recompilation, so an incompatible target cannot be silently retargeted.
+
 The historical `usr -> .` and `local -> .` build aliases become a real
 `usr/local` directory with nonrecursive links to the SDK's include/lib
 directories. Absolute internal library links become relative links. The SDK's
 libmpv is replaced by the exact packaged runtime libmpv, including the existing
 recorded Vulkan import transformation; the original source-build receipts stay
 in evidence.
+
+The supported development interface is headers, static/shared libraries and
+pkg-config. Libtool `.la` files are excluded because their embedded dependency
+paths do not follow `PKG_CONFIG_SYSROOT_DIR`. Installed SDK `-I`/`-L` paths in
+pkg-config are rebased to the virtual `/usr/local` tree. An absolute NDK library
+path is replaced by `-l:<filename>` only when the selected ABI's NDK compiler
+resolves that exact filename to the same file. Other host paths remain errors.
+`sdk-checks.json` records the excluded and rewritten metadata counts.
+
+The Vulkan pkg-config version is derived from the selected NDK compiler's
+actual header macros. A compile/link probe checks those macros and the loader
+before emitting metadata, retaining mpv's minimum Vulkan header requirement.
+This avoids Meson 1.6's target-execution version probe during cross compilation;
+the per-ABI `vulkan*.json` evidence does not assert device Vulkan capabilities.
 
 The workflow uploads `routing-native-package.tar.gz` so GitHub artifact ZIP
 handling cannot discard or expand these links. The older individual JAR

@@ -29,7 +29,7 @@ class BundlePipelineTests(unittest.TestCase):
         tools = ndk / 'toolchains/llvm/prebuilt/linux-x86_64/bin'
         tools.mkdir(parents=True)
         (ndk / 'source.properties').write_text('Pkg.Revision = 27.2.12479018\n')
-        for name in ('clang', 'llvm-nm', 'llvm-readelf'):
+        for name in ('clang', 'llvm-nm', 'llvm-readelf', 'llvm-dis'):
             self.executable(tools / name, 'exit 0')
         (self.bs / 'scripts/current_native_sources.py').write_text(
             'import pathlib,sys\n'

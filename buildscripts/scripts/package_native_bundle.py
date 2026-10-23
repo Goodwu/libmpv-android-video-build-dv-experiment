@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import struct
 import subprocess
@@ -26,6 +27,12 @@ ABIS = {
     'armeabi-v7a': (1, 40, ''),
     'x86': (1, 3, '-x86'),
     'x86_64': (2, 62, '-x64'),
+}
+NDK_TARGETS = {
+    'arm64-v8a': 'aarch64-linux-android',
+    'armeabi-v7a': 'armv7a-linux-androideabi',
+    'x86': 'i686-linux-android',
+    'x86_64': 'x86_64-linux-android',
 }
 FEATURES = {
     'HAVE_PL_EXTERNAL_YUV': 'mpv.pl-external-yuv',
@@ -60,9 +67,9 @@ def elf_header(data, abi, label):
         raise ValueError(f'ELF ABI differs from {abi}: {label}')
 
 
-def archive_objects(path, abi):
+def archive_objects(path, abi, *, llvm_dis, target_triple):
     """Validate actual archive members, including GNU/BSD extended names."""
-    count = 0
+    count, bitcode_count = 0, 0
     with path.open('rb') as stream:
         if stream.read(8) != b'!<arch>\n':
             raise ValueError(f'unsupported or thin static archive: {path}')
@@ -84,16 +91,62 @@ def archive_objects(path, abi):
                         raise ValueError(f'invalid BSD archive name: {path}')
                     name = stream.read(length).rstrip(b'\x00').decode('utf-8')
                 if not name.startswith('__.SYMDEF'):
-                    elf_header(stream.read(min(64, end - stream.tell())), abi,
-                               f'{path.name}({name})')
+                    data = stream.read(end - stream.tell())
+                    if data.startswith((b'BC\xc0\xde', b'\xde\xc0\x17\x0b')):
+                        # dav1d is built with LTO. Inspect original bitcode with
+                        # the selected NDK, without recompiling/retargeting it.
+                        result = subprocess.run([str(llvm_dis), '-o', '-', '-'], input=data,
+                                                check=True, capture_output=True, timeout=60)
+                        triples = re.findall(r'^target triple = "([^"]+)"$',
+                                             result.stdout.decode('utf-8'), re.M)
+                        if triples != [target_triple]:
+                            raise ValueError(f'bitcode target differs from {abi}: {path.name}({name}): {triples}')
+                        bitcode_count += 1
+                    else:
+                        elf_header(data[:64], abi, f'{path.name}({name})')
                     count += 1
             stream.seek(end + size % 2)
         if stream.tell() != total or not count:
             raise ValueError(f'empty or misaligned static archive: {path}')
-    return count
+    return count, bitcode_count
 
 
-def copy_sdk(source, destination, abi, runtime_members, build_root):
+def relocate_pkgconfig(text, source, ndk_root, compiler):
+    """Rebase installed SDK flags and prove replacements for NDK library paths."""
+    lines = []
+    for line in text.splitlines(keepends=True):
+        field, separator, value = line.partition(':')
+        if field not in ('Libs', 'Libs.private', 'Cflags') or not separator:
+            lines.append(line)
+            continue
+        tokens = shlex.split(value)
+        updated = []
+        for token in tokens:
+            if token.startswith(('-I/', '-L/')):
+                path = Path(token[2:])
+                if path.resolve().is_relative_to(source):
+                    relative = path.resolve(strict=True).relative_to(source)
+                    token = token[:2] + '/usr/local/' + relative.as_posix()
+            elif token.startswith('/'):
+                path = Path(token).resolve(strict=True)
+                if not path.is_relative_to(ndk_root) or not re.fullmatch(r'lib[\w.+-]+\.(a|so)', path.name):
+                    raise ValueError(f'unsupported absolute library in pkg-config: {token}')
+                # -l:<filename> keeps the original static/shared choice. Only
+                # replace a path when this exact ABI compiler selects that file.
+                selected = subprocess.run([str(compiler), '-print-file-name=' + path.name],
+                                          check=True, capture_output=True, text=True, timeout=60).stdout.strip()
+                if not Path(selected).is_file() or Path(selected).resolve() != path:
+                    raise ValueError(f'NDK compiler selects a different library: {token}')
+                token = '-l:' + path.name
+            updated.append(token)
+        if updated != tokens:
+            lines.append(field + ': ' + shlex.join(updated) + '\n')
+        else:
+            lines.append(line)
+    return ''.join(lines)
+
+
+def copy_sdk(source, destination, abi, runtime_members, build_root, *, ndk_root, ndk_compiler):
     if source.is_symlink() or not source.is_dir():
         raise ValueError(f'missing real SDK prefix: {source}')
     source = source.resolve()
@@ -139,12 +192,25 @@ def copy_sdk(source, destination, abi, runtime_members, build_root):
             raise ValueError(f'SDK library resolves outside the package: {path}')
         resolved.write_bytes(data)
 
-    counts = {'staticArchives': 0, 'archiveObjects': 0, 'elfFiles': 0}
+    target_triple = subprocess.run([str(ndk_compiler), '-dumpmachine'], check=True,
+                                  capture_output=True, text=True, timeout=60).stdout.strip()
+    counts = {'staticArchives': 0, 'archiveObjects': 0, 'bitcodeObjects': 0,
+              'bitcodeTargetTriple': target_triple, 'elfFiles': 0,
+              'excludedLibtoolArchives': 0, 'relocatedPkgconfigFiles': 0}
+    # This SDK is consumed through headers, pkg-config and .a/.so libraries.
+    # Libtool .la files are not a supported interface and retain host-specific
+    # dependency paths which libtool does not rebase with PKG_CONFIG_SYSROOT_DIR.
+    for path in sorted(destination.rglob('*.la')):
+        path.unlink()
+        counts['excludedLibtoolArchives'] += 1
     for path in sorted(destination.rglob('*')):
         if path.is_symlink() or not path.is_file():
             continue
         if path.suffix == '.a':
-            counts['archiveObjects'] += archive_objects(path, abi)
+            objects, bitcode = archive_objects(path, abi, llvm_dis=ndk_compiler.parent / 'llvm-dis',
+                                              target_triple=target_triple)
+            counts['archiveObjects'] += objects
+            counts['bitcodeObjects'] += bitcode
             counts['staticArchives'] += 1
         else:
             with path.open('rb') as stream:
@@ -154,12 +220,18 @@ def copy_sdk(source, destination, abi, runtime_members, build_root):
                 counts['elfFiles'] += 1
         if path.suffix in ('.pc', '.la', '.cmake') or path.name == 'crossfile.txt':
             text = path.read_text()
+            if path.suffix == '.pc':
+                relocated = relocate_pkgconfig(text, source, ndk_root.resolve(), ndk_compiler)
+                if relocated != text:
+                    path.write_text(relocated)
+                    counts['relocatedPkgconfigFiles'] += 1
+                text = relocated
             if str(build_root.resolve()) in text or str(source) in text:
                 raise ValueError(f'SDK metadata retains a build-machine prefix: {path}')
             if path.suffix == '.pc':
                 # /usr and /usr/local are virtual paths resolved by the SDK's
                 # PKG_CONFIG_SYSROOT_DIR; arbitrary host absolute paths are not.
-                absolute = re.findall(r'(?:^|[=\s]|-[IL])(/[^\s;]*)', text)
+                absolute = re.findall(r'(?:^|[=\s,]|-[IL])(/[^,\s;]*)', text)
                 if any(not (value == '/usr' or value.startswith('/usr/')) for value in absolute):
                     raise ValueError(f'non-relocatable pkg-config path: {path}')
     return counts
@@ -261,6 +333,14 @@ def collect(root, output, *, android_api, profile):
         if any(p.is_symlink() for p in (payload / 'evidence').rglob('*')):
             raise ValueError('producer evidence must not contain symlinks')
         sources = source_identity(root, payload / 'evidence')
+        ndk = (evidence / 'ndk-source.properties').read_text()
+        revisions = re.findall(r'^Pkg.Revision\s*=\s*(\S+)\s*$', ndk, re.MULTILINE)
+        if len(revisions) != 1:
+            raise ValueError('NDK revision is missing or ambiguous')
+        ndk_root = root / 'sdk/android-sdk-linux/ndk' / revisions[0]
+        toolchains = list((ndk_root / 'toolchains/llvm/prebuilt').glob('*/bin'))
+        if len(toolchains) != 1:
+            raise ValueError('expected one selected NDK host toolchain')
         features, config_hashes, sdk_checks, jars, prefixes = {}, {}, {}, {}, {}
         for abi in ABIS:
             jar, members = read_runtime(root, abi)
@@ -268,7 +348,8 @@ def collect(root, output, *, android_api, profile):
             shutil.copyfile(jar, payload / jars[abi])
             prefixes[abi] = f'sdk/{abi}'
             sdk_checks[abi] = copy_sdk(root / 'prefix' / abi, payload / prefixes[abi],
-                                       abi, members, root)
+                                       abi, members, root, ndk_root=ndk_root,
+                                       ndk_compiler=toolchains[0] / f'{NDK_TARGETS[abi]}{android_api}-clang')
             features[abi], config_hashes[abi] = compiled_features(root, abi)
         baseline = features[next(iter(ABIS))]
         if any(value != baseline for value in features.values()):
@@ -278,10 +359,6 @@ def collect(root, output, *, android_api, profile):
             raise ValueError('this custom Android DV profile requires the fork APIs')
         (payload / 'evidence/sdk-checks.json').write_text(json.dumps(sdk_checks, indent=2, sort_keys=True) + '\n')
         (payload / 'evidence/compiled-features.json').write_text(json.dumps(features, indent=2, sort_keys=True) + '\n')
-        ndk = (evidence / 'ndk-source.properties').read_text()
-        revisions = re.findall(r'^Pkg.Revision\s*=\s*(\S+)\s*$', ndk, re.MULTILINE)
-        if len(revisions) != 1:
-            raise ValueError('NDK revision is missing or ambiguous')
         compiler_files = {}
         for line in (evidence / 'toolchain-files.sha256').read_text().splitlines():
             match = re.fullmatch(r'([0-9a-f]{64}) [ *](.+)', line)
@@ -315,6 +392,7 @@ def collect(root, output, *, android_api, profile):
             'python tool/native_package/package.py create --root "$PWD/root" --spec "$PWD/spec.json"\n'
             'Use the resulting manifest hash to verify this package before consumption.\n'
             'runtime/ contains Android JARs; sdk/<abi>/ is a separate development sysroot.\n'
+            'The development interface is headers, .a/.so and pkg-config; libtool .la files are excluded.\n'
             'For pkg-config set PKG_CONFIG_SYSROOT_DIR=<absolute sdk/<abi>> and\n'
             'PKG_CONFIG_LIBDIR=<absolute sdk/<abi>/lib/pkgconfig>; unset PKG_CONFIG_PATH.\n'
             'Use the recorded NDK/API/STL and its cross compiler. Runtime/device testing is pending.\n')
