@@ -46,6 +46,8 @@ builds.
 3. dav1d's existing LTO build produces LLVM bitcode archive members. The
    collector now uses the same NDK's `llvm-dis` to compare their original target
    triples with the compiler target, preserving the LTO build and ABI gate.
+   Four actual NDK LTO probes confirmed that `-print-effective-triple` matches
+   emitted modules; the armv7a driver spelling becomes LLVM's canonical armv7.
 
 ## Observed results
 

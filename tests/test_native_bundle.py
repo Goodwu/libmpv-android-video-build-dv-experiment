@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import shutil
 import subprocess
@@ -25,6 +26,7 @@ class NativeBundleTests(unittest.TestCase):
         if not shutil.which('clang') or not shutil.which('ld.lld'):
             raise RuntimeError('real clang/LLD fixture tools are required')
         cls.binary = {}
+        cls.llvm_targets = {}
         triples = {'arm64-v8a': 'aarch64-linux-gnu', 'armeabi-v7a': 'armv7a-linux-gnueabi',
                    'x86': 'i686-linux-gnu', 'x86_64': 'x86_64-linux-gnu'}
         source = cls.base / 'fixture.c'
@@ -35,6 +37,9 @@ class NativeBundleTests(unittest.TestCase):
             obj = folder / 'long_native_fixture_object_name.o'
             subprocess.run(['clang', '--target=' + triple, '-fPIC', '-c', str(source), '-o', str(obj)],
                            check=True, capture_output=True)
+            llvm = subprocess.check_output(['clang', '--target=' + triple, '-S', '-emit-llvm',
+                                            str(source), '-o', '-'], text=True)
+            cls.llvm_targets[abi] = re.search(r'^target triple = "([^"]+)"$', llvm, re.M)[1]
             library = folder / 'libfixture.so'
             subprocess.run(['clang', '--target=' + triple, '-fuse-ld=lld', '-nostdlib', '-shared',
                             '-Wl,--build-id', '-Wl,-soname,libfixture.so', str(obj), '-o', str(library)],
@@ -145,7 +150,9 @@ class NativeBundleTests(unittest.TestCase):
         self.assertEqual(set(spec['identity']['sources']), set(bundle.SOURCE_DEPS))
         self.assertTrue((self.output / 'spec.json').is_file())
         self.assertFalse((self.output / 'root/spec.json').exists())
+        sdk_checks = json.loads((self.output / 'root/evidence/sdk-checks.json').read_text())
         for abi in bundle.ABIS:
+            self.assertEqual(sdk_checks[abi]['bitcodeTargetTriple'], self.llvm_targets[abi])
             sdk = self.output / 'root' / spec['layout']['sdk_prefixes'][abi]
             self.assertEqual((sdk / 'lib/libmpv.so').read_bytes(), self.binary[abi][0])
             self.assertEqual((sdk / 'lib/libalias.a').readlink(), Path('libplacebo.a'))

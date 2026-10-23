@@ -69,7 +69,9 @@ external links and build-machine paths in pkg-config metadata fail the
 collection step.
 
 For LTO archive members, the selected NDK's `llvm-dis` must report exactly the
-target triple reported by that ABI/API compiler. These members are inspected
+effective LLVM target triple reported by that ABI/API compiler. The driver
+triple is recorded separately because Clang normalizes aliases such as armv7a
+to armv7 in LLVM modules. These members are inspected
 without recompilation, so an incompatible target cannot be silently retargeted.
 
 The historical `usr -> .` and `local -> .` build aliases become a real

@@ -192,10 +192,15 @@ def copy_sdk(source, destination, abi, runtime_members, build_root, *, ndk_root,
             raise ValueError(f'SDK library resolves outside the package: {path}')
         resolved.write_bytes(data)
 
-    target_triple = subprocess.run([str(ndk_compiler), '-dumpmachine'], check=True,
+    driver_triple = subprocess.run([str(ndk_compiler), '-dumpmachine'], check=True,
+                                  capture_output=True, text=True, timeout=60).stdout.strip()
+    # Clang's driver accepts aliases (armv7a), while LLVM modules record the
+    # canonical target (armv7). Ask Clang for its effective LLVM target instead
+    # of guessing an alias mapping or weakening the comparison.
+    target_triple = subprocess.run([str(ndk_compiler), '-print-effective-triple'], check=True,
                                   capture_output=True, text=True, timeout=60).stdout.strip()
     counts = {'staticArchives': 0, 'archiveObjects': 0, 'bitcodeObjects': 0,
-              'bitcodeTargetTriple': target_triple, 'elfFiles': 0,
+              'bitcodeTargetTriple': target_triple, 'driverTargetTriple': driver_triple, 'elfFiles': 0,
               'excludedLibtoolArchives': 0, 'relocatedPkgconfigFiles': 0}
     # This SDK is consumed through headers, pkg-config and .a/.so libraries.
     # Libtool .la files are not a supported interface and retain host-specific
